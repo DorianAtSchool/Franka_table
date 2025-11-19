@@ -1,0 +1,4 @@
+trial,view,video_path,delta_z,success,joint_values
+0,side,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_sweeps\run_20251119_004633\side\trial_000_view-side_dz-+0.336_success-1.mp4,0.335851,1,"1.3062 1.4934 0.0819 -0.5156 1.6233 1.8891 -1.2200"
+0,top,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_sweeps\run_20251119_004633\top\trial_000_view-top_dz-+0.336_success-1.mp4,0.335851,1,"1.3062 1.4934 0.0819 -0.5156 1.6233 1.8891 -1.2200"
+0,wrist,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_sweeps\run_20251119_004633\wrist\trial_000_view-wrist_dz-+0.336_success-1.mp4,0.335851,1,"1.3062 1.4934 0.0819 -0.5156 1.6233 1.8891 -1.2200"

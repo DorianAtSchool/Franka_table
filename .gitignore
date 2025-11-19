@@ -1,0 +1,20 @@
+# Bytecode and cache
+__pycache__/
+*.py[cod]
+
+# Outputs and artifacts
+outputs/
+**/events.out.tfevents.*
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+venv/
+.env
+
+
+

@@ -1,0 +1,9 @@
+variant,view,video_path,delta_z,success
+baseline,side,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\baseline\side\trial_000_variant-baseline_view-side_dz-+0.343_success-1.mp4,0.343114,1
+baseline,top,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\baseline\top\trial_001_variant-baseline_view-top_dz-+0.343_success-1.mp4,0.343114,1
+elbow_first,side,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\elbow_first\side\trial_002_variant-elbow_first_view-side_dz-+0.042_success-1.mp4,0.042260,1
+elbow_first,top,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\elbow_first\top\trial_003_variant-elbow_first_view-top_dz-+0.042_success-1.mp4,0.042260,1
+overshoot,side,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\overshoot\side\trial_004_variant-overshoot_view-side_dz--0.038_success-0.mp4,-0.037740,0
+overshoot,top,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\overshoot\top\trial_005_variant-overshoot_view-top_dz--0.038_success-0.mp4,-0.037740,0
+swing,side,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\swing\side\trial_006_variant-swing_view-side_dz-+0.332_success-1.mp4,0.332183,1
+swing,top,C:\Users\Dorian\Documents\mujoco_sim\franka_table\videos\robot1_pickup_path_variants\run_20251118_212647\swing\top\trial_007_variant-swing_view-top_dz-+0.332_success-1.mp4,0.332183,1
