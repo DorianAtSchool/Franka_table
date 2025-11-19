@@ -1,0 +1,32 @@
+# Core simulation / RL
+gymnasium>=0.29
+mujoco>=3.1
+numpy>=1.24
+
+# Video / rendering
+imageio>=2.34
+imageio-ffmpeg>=0.4.9
+mediapy>=1.1
+pillow>=10.0
+
+# RL (single-agent PPO)
+stable-baselines3[extra]>=2.3
+
+# Teleoperation (keyboard/gamepad)
+pygame>=2.5
+pynput>=1.7
+
+# LeRobot-style datasets
+torch>=2.2
+datasets>=2.19
+pyarrow>=12.0
+pandas>=2.0
+packaging>=23.0
+huggingface_hub>=0.20
+
+# Experiment tracking (optional)
+wandb>=0.16
+
+# Optional camera backend (used by some camera utilities)
+opencv-python>=4.8
+
