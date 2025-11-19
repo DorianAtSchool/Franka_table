@@ -3,12 +3,12 @@
 This package provides MuJoCo scenes and Python helpers for Franka Emika Panda
 tabletop manipulation, including:
 
-- A 4‑robot Franka Panda table scene
-- Gymnasium environments for single‑arm PPO training
+- A 4-robot Franka Panda table scene
+- Gymnasium environments for single-arm PPO training
 - Scripted pickup/sweep demos for robot 1
-- Tools to record and build LeRobot‑style datasets (state only or with images)
+- Tools to record and build LeRobot-style datasets (state only or with images)
 
-Everything under this folder is self‑contained and can be imported as the
+Everything under this folder is self-contained and can be imported as the
 `franka_table` Python package from the repository root.
 
 ## Requirements
@@ -27,7 +27,7 @@ Key libraries used by `franka_table`:
 - `mujoco`, `gymnasium`, `stable-baselines3[extra]`, `numpy`
 - `imageio`, `mediapy` for rendering/export
 - `pynput` for keyboard teleoperation
-- `pandas`, `pyarrow`, `datasets`, `torch` (for LeRobot‑style datasets)
+- `pandas`, `pyarrow`, `datasets`, `torch` (for LeRobot-style datasets)
 
 ## Project Layout
 
@@ -36,25 +36,25 @@ Key libraries used by `franka_table`:
   - `scene_4robots.xml` – four Panda arms around a table
   - `franka_emika_panda/scene_4pandas_table.xml` and related assets
 - `environments/`
-  - `franka_4robots_env.FrankaTable4RobotsEnv` – base MuJoCo env for the 4‑robot scene
+  - `franka_4robots_env.FrankaTable4RobotsEnv` – base MuJoCo env for the 4-robot scene
 - `rl/`
-  - `envs/single_from_four.py` – single‑agent wrapper exposing one robot’s action space
+  - `envs/single_from_four.py` – single-agent wrapper exposing one robot’s action space
   - `scripts/train_ppo_single_from_four.py` – PPO training script
 - `demos/`
-  - `robot1_pickup_demo.py` – hand‑tuned pickup + lift demo
+  - `robot1_pickup_demo.py` – hand-tuned pickup + lift demo
   - `robot1_pickup_path_variants.py` – scripted trajectory variants
   - `robot1_pickup_sweep.py` – sweep over random placements to generate many episodes
 - `datasets/`
-  - `lerobot_writer.py` – utilities to build LeRobot‑style datasets
+  - `lerobot_writer.py` – utilities to build LeRobot-style datasets
   - `franka_table_synth/` – example synthetic dataset built from scripted sweeps
 - `scripts/`
-  - `record_demo.py` – keyboard teleop recorder that writes LeRobot‑style datasets
+  - `record_demo.py` – keyboard teleop recorder that writes LeRobot-style datasets
   - `augment_dataset.py`, `export_video.py`, `replay_randomized.py` – dataset tools
 - `outputs/` – default output root (RL logs, figures, etc.)
-- `videos/` – pre‑rendered demo videos
+- `videos/` – pre-rendered demo videos
 
 `config.py` also exposes helpers such as `get_scene_path("scene_4robots.xml")` and
-`get_output_path(...)` so scripts do not need hard‑coded paths.
+`get_output_path(...)` so scripts do not need hard-coded paths.
 
 ## Running Scripted Demos
 
@@ -73,13 +73,13 @@ You can similarly run:
 - `python franka_table/demos/robot1_pickup_sweep.py`
 - `python franka_table/demos/robot1_pickup_path_variants.py`
 
-These scripts generate `.npz` episodes and demo videos under `datasets/` and
+These scripts generate synthetic episodes and demo videos under `datasets/` and
 `videos/` for downstream dataset construction.
 
-## PPO Training on the 4‑Robot Scene
+## PPO Training on the 4-Robot Scene
 
-`rl/envs/single_from_four.py` wraps the base 4‑robot environment into a
-single‑agent Gymnasium env. The agent controls one arm (7 joints + gripper);
+`rl/envs/single_from_four.py` wraps the base 4-robot environment into a
+single-agent Gymnasium env. The agent controls one arm (7 joints + gripper);
 the remaining robots hold their positions. Reward shaping encourages reaching,
 grasping and lifting while discouraging robot–robot collisions.
 
@@ -128,10 +128,10 @@ for _ in range(1000):
 env.close()
 ```
 
-## Recording Teleoperated Demos (LeRobot‑Style Dataset)
+## Recording Teleoperated Demos (LeRobot-Style Dataset)
 
 `scripts/record_demo.py` lets you control robot 1 via the keyboard and record
-episodes to a LeRobot‑like dataset on disk. Controls (see the docstring for
+episodes to a LeRobot-like dataset on disk. Controls (see the docstring for
 details):
 
 - `W/S` – +X / −X, `A/D` – −Y / +Y, `R/F` – +Z / −Z
@@ -150,25 +150,66 @@ python franka_table/scripts/record_demo.py \
 
 This writes:
 
-- Per‑frame data as Parquet under `datasets/franka_table_synth/data/`
+- Per-frame data as Parquet under `datasets/franka_table_synth/data/`
 - Episode metadata under `datasets/franka_table_synth/meta/`
 - Optional videos under `datasets/franka_table_synth/videos/`
 
-The dataset format is compatible with LeRobot‑style training pipelines: you can
+The dataset format is compatible with LeRobot-style training pipelines: you can
 point LeRobot configs to `datasets/franka_table_synth` as the dataset root.
 
-## Building Synthetic Datasets from Scripted Sweeps
+## Synthetic Dataset Generation via Sweep
 
-`datasets/lerobot_writer.py` also provides
-`build_dataset_from_sweep_npz(...)`, which turns `.npz` episodes created by
-`demos/robot1_pickup_sweep.py` (and related scripts) into a structured
-LeRobot‑style dataset (`franka_table_synth/`). At a high level:
+The main synthetic dataset is produced directly by
+`demos/robot1_pickup_sweep.py`, which drives MuJoCo and writes into
+`LeRobotDatasetWriter` on each simulation frame (no `.npz` intermediate).
 
-1. Run sweep/variant demo scripts to generate `.npz` episodes.
-2. Call `build_dataset_from_sweep_npz(...)` from a small Python script,
-   pointing it at the `.npz` directory and the MuJoCo XML model.
-3. Use the resulting dataset with your imitation / RL training setup.
+High-level flow in `run_sweep(...)`:
 
-This makes it easy to go from MuJoCo simulation rollouts to standardized
-datasets and RL experiments using the same Franka table scenes.
+- Load a 4-robot scene XML (prefers `scenes/scene_4robots.xml` but falls back
+  to `scenes/scene_4robots_real.xml` or `scenes/franka_emika_panda/scene_4pandas_table.xml`).
+- Initialize the scene (`init_scene_state`) so all four robots and the object
+  match the pickup demo initial state.
+- Construct a `LeRobotDatasetWriter(root=dataset_root, cameras=views)` with
+  `dataset_root` typically `datasets/franka_table_synth`.
+- For each trial:
+  - Sample a noisy target joint configuration around `BASE_TARGET_JOINTS`.
+  - Start a new episode with `writer.start_episode(...)` and keep the returned
+    episode buffer and its `episode_index`.
+  - Prepare MuJoCo renderers for the requested camera views (side/top/wrist).
+  - Call `create_pickup_trajectory(...)` with an `on_frame` callback that:
+    - Renders all requested camera views from the *same* MuJoCo state.
+    - Computes an end-effector state
+      `state = [x, y, z, qx, qy, qz, qw]` from the EE site pose.
+    - Computes a 7-D action as finite differences between consecutive states:
+      `[dx, dy, dz, droll, dpitch, dyaw, dgrip]` using quaternion→RPY via
+      `quat_to_rpy(...)`.
+    - Packs the latest RGB frames per camera into an `images` dict
+      (`{"side": ..., "top": ..., "wrist": ...}` for the enabled views).
+    - Calls `episode.add_frame(...)` with
+      `observation_state=state`, `action=action`, `timestamp=data.time`,
+      `done=False` (final frame is marked later), and the `images` dict.
+  - After the rollout, mark the last frame’s `next.done=True` and close the
+    episode with `writer.end_episode(...)`.
+  - Save per-view `.mp4` videos with filenames that encode trial index,
+    camera view, and lift height `delta_z`, and append a row to a run-level
+    `summary.csv` in `videos/robot1_pickup_sweeps/run_*/`.
+  - Append a JSON line to `datasets/franka_table_synth/meta/trial_mapping.jsonl`
+    linking `trial_index` → `episode_index`, lift metrics, target joints and
+    relative video/data paths.
+- After all trials, call `writer.finalize()` to flush metadata, including
+  `meta/info.json`, `meta/episodes/chunk-000/file-000.parquet` and
+  `episodes.jsonl`.
+
+On disk, the resulting dataset under `datasets/franka_table_synth` follows a
+LeRobot-style layout:
+
+- Per-frame data: `data/chunk-000/episode_XXXXXX.parquet`
+- Episode metadata: `meta/episodes/chunk-000/file-000.parquet`
+- Global index: `episodes.jsonl`, `meta/info.json`, `meta/tasks.parquet`
+- Optional videos: `videos/<camera>/...` plus `meta/trial_mapping.jsonl`
+
+This design lets downstream LeRobot or imitation-learning code treat
+`datasets/franka_table_synth` as a standard dataset, while `robot1_pickup_sweep`
+efficiently reuses a single MuJoCo rollout per trial to generate both RGB
+videos and structured trajectories.
 
