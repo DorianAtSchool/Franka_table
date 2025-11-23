@@ -1,2 +1,0 @@
-{"episode_index": 0, "length": 405, "tasks": [0], "parquet": "data/chunk-000/episode_000000.parquet", "cameras": ["side"]}
-{"episode_index": 1, "length": 405, "tasks": [0], "parquet": "data/chunk-000/episode_000001.parquet", "cameras": ["side"]}

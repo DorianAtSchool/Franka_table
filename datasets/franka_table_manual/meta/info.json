@@ -1,0 +1,112 @@
+{
+  "codebase_version": "v2.0",
+  "name": "franka_table_manual",
+  "robot_type": "FrankaPanda",
+  "fps": 25,
+  "total_episodes": 1,
+  "total_frames": 169,
+  "total_tasks": 1,
+  "total_videos": 0,
+  "total_chunks": 1,
+  "chunks_size": 1,
+  "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+  "video_path": "videos/{camera}/chunk-{episode_chunk:03d}/file-{file_index:03d}.mp4",
+  "features": {
+    "image": {
+      "dtype": "image",
+      "shape": [
+        720,
+        1280,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ]
+    },
+    "second_image": {
+      "dtype": "image",
+      "shape": [
+        720,
+        1280,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ]
+    },
+    "wrist_image": {
+      "dtype": "image",
+      "shape": [
+        720,
+        1280,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ]
+    },
+    "state": {
+      "dtype": "float32",
+      "shape": [
+        9
+      ],
+      "names": [
+        "state"
+      ]
+    },
+    "actions": {
+      "dtype": "float32",
+      "shape": [
+        8
+      ],
+      "names": [
+        "actions"
+      ]
+    },
+    "timestamp": {
+      "dtype": "float32",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "frame_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "episode_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    },
+    "task_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "names": null
+    }
+  },
+  "cameras": [
+    "side"
+  ],
+  "format_version": "v2.1-simplified"
+}

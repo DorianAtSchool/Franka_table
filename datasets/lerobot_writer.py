@@ -43,6 +43,18 @@ class EpisodeBuffer:
             "next.done": bool(done),
             "task_index": int(self.task_index),
         }
+        
+        # Store image references for each camera
+        # Images themselves are stored in video files, not in parquet
+        # But we keep track of them for video generation
+        for cam_name, img_array in images.items():
+            # Store reference to indicate this frame has an image for this camera
+            row[f"observation.images.{cam_name}"] = True
+            # Track frames for video generation
+            if cam_name not in self.camera_frame_paths:
+                self.camera_frame_paths[cam_name] = []
+            # We don't actually store the image here, just mark that it exists
+            # The actual image data is used for video generation outside parquet
 
         self.frames.append(row)
 
@@ -90,6 +102,7 @@ class LeRobotDatasetWriter:
         self.episodes_chunk_dir = self.episodes_root / "chunk-000"
         # Video shards root: videos/{camera}/chunk-xxx/file-yyy.mp4
         self.videos_root = self.root / "videos"
+        self.trial_map_file = self.meta_dir / "trial_mapping.jsonl"
         # Legacy attribute used by callers; kept for compatibility but not used to store PNG frames.
         self.frames_dir = self.root / "frames"
         # Optional JSONL index of episodes (for convenience)
@@ -153,7 +166,19 @@ class LeRobotDatasetWriter:
         self._episode_count += 1
         return EpisodeBuffer(task_index=task_idx, episode_index=ep_idx, fps=self.fps)
 
-    def end_episode(self, episode: EpisodeBuffer, length: int, task_text: str) -> None:
+    def end_episode(
+        self,
+        episode: EpisodeBuffer,
+        length: int,
+        task_text: str,
+        video_paths: Optional[Dict[str, str]] = None,
+        trial_info: Optional[Dict[str, Any]] = None,
+        run_id: Optional[str] = None,
+        trial_index: Optional[int] = None,
+        delta_z: Optional[float] = None,
+        success: Optional[int] = None,
+        target_joints: Optional[List[float]] = None,
+    ) -> None:
         ep_idx = episode.episode_index
         ep_prefix = f"episode_{ep_idx:06d}"
         parquet_path = self.data_dir / f"{ep_prefix}.parquet"
@@ -167,7 +192,99 @@ class LeRobotDatasetWriter:
             "parquet": os.path.relpath(parquet_path, self.root).replace(os.sep, "/"),
             "cameras": self.cameras,
         }
+        if video_paths:
+            ep_meta["videos"] = video_paths
         self._episodes_meta.append(ep_meta)
+        
+        # Build trial_info from individual parameters if not provided
+        if trial_info is None and any([run_id, trial_index is not None, delta_z is not None, success is not None, target_joints]):
+            trial_info = {}
+            if run_id is not None:
+                trial_info["run_id"] = run_id
+            if trial_index is not None:
+                trial_info["trial_index"] = trial_index
+            if delta_z is not None:
+                trial_info["delta_z"] = float(delta_z)
+            if success is not None:
+                trial_info["success"] = int(success)
+            if target_joints is not None:
+                trial_info["target_joints"] = [float(v) for v in target_joints]
+        
+        if trial_info:
+            self._append_trial_mapping(
+                episode_index=ep_idx,
+                data_parquet=ep_meta["parquet"],
+                video_paths=video_paths,
+                trial_info=trial_info,
+            )
+
+    def write_video(
+        self,
+        camera: str,
+        frames: List[np.ndarray],
+        episode_index: int,
+        fps: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Save a list of RGB frames to an MP4 under videos/<camera>/chunk-000/.
+        Returns the relative path (posix style) from the dataset root.
+        """
+        if not frames:
+            raise ValueError("No frames provided for video export.")
+        metadata = metadata or {}
+        chunk_dir = self.videos_root / camera / "chunk-000"
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        trial_idx = metadata.get("trial_index")
+        delta_z = metadata.get("delta_z")
+        success = metadata.get("success")
+        custom_name = metadata.get("filename")
+        if custom_name:
+            stem = custom_name
+        elif trial_idx is not None:
+            stem = f"trial_{int(trial_idx):03d}_view-{camera}"
+            if delta_z is not None:
+                stem += f"_dz-{float(delta_z):+.3f}"
+            if success is not None:
+                stem += f"_success-{int(success)}"
+        else:
+            stem = f"file-{episode_index:03d}"
+        file_path = chunk_dir / f"{stem}.mp4"
+
+        # Prefer mediapy for consistency with sweep scripts; fallback to imageio.
+        try:
+            import mediapy as media  # type: ignore
+
+            media.write_video(str(file_path), frames, fps=fps or self.fps)
+        except ImportError:
+            with imageio.get_writer(file_path, fps=fps or self.fps) as writer:
+                for frame in frames:
+                    writer.append_data(frame)
+        rel_path = os.path.relpath(file_path, self.root).replace(os.sep, "/")
+        return rel_path
+
+    def _append_trial_mapping(
+        self,
+        episode_index: int,
+        data_parquet: str,
+        video_paths: Optional[Dict[str, str]],
+        trial_info: Dict[str, Any],
+    ) -> None:
+        """
+        Append a trial mapping record to meta/trial_mapping.jsonl for filtering.
+        """
+        record: Dict[str, Any] = {
+            "episode_index": int(episode_index),
+            "data_parquet": data_parquet,
+            "episodes_parquet": "meta/episodes/chunk-000/file-000.parquet",
+            "episodes_jsonl": "episodes.jsonl",
+        }
+        record.update(trial_info)
+        if video_paths:
+            record["videos"] = video_paths
+        self.trial_map_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.trial_map_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
 
     def finalize(self) -> None:
         # Merge tasks (preserve existing indices; assign new indices after max existing)
@@ -279,6 +396,11 @@ class LeRobotDatasetWriter:
         # Assume images are 720x1280x3 as configured in renderers
         image_shape = [720, 1280, 3]
 
+        # Count mp4 videos stored under videos/
+        total_videos = 0
+        if self.videos_root.exists():
+            total_videos = sum(1 for _ in self.videos_root.rglob("*.mp4"))
+
         info = {
             "codebase_version": "v2.0",
             "name": self.dataset_name,
@@ -287,7 +409,7 @@ class LeRobotDatasetWriter:
             "total_episodes": n_episodes,
             "total_frames": n_frames,
             "total_tasks": len(merged),
-            "total_videos": 0,
+            "total_videos": total_videos,
             "total_chunks": 1,
             "chunks_size": n_episodes,
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
