@@ -213,3 +213,73 @@ This design lets downstream LeRobot or imitation-learning code treat
 efficiently reuses a single MuJoCo rollout per trial to generate both RGB
 videos and structured trajectories.
 
+## Randomized Environments, VLA Control, and Mixed Interventions
+
+In addition to scripted sweeps and keyboard teleop, `franka_table` includes a
+set of Gymnasium-backed interactive tools under `synthetic_gen/` that share
+MuJoCo state with the training environments.
+
+### Randomized 4-Robot Env
+
+- `environments/franka_4robots_env.py` defines:
+  - `FrankaTable4RobotsEnv` �?" base MuJoCo env with fixed start pose.
+  - `RandomizedFrankaTable4RobotsEnv` �?" wrapper that randomizes object pose
+    (XY region, fixed Z, optional random orientation) and robot joint angles
+    within configurable fractions of their limits.
+
+The randomized env uses Gymnasium’s `Env.reset` for seeding and then applies
+MuJoCo state changes directly to `MjData`, ensuring compatibility with the
+original 4-robot scene while providing diverse starts for data collection.
+
+### VLA-Style Interactive GUIs
+
+`synthetic_gen/interactive_record_replay_randomized_vla.py` introduces a
+VLA-style controller and GUI:
+
+- `RandomizedVLAController`:
+  - Wraps `RandomizedFrankaTable4RobotsEnv` and exposes VLA-style controls in
+    **end-effector space**.
+  - Uses `utils/jacobian.jacobian_ik6_step` to convert a desired 6D twist at
+    the gripper site into joint deltas for the chosen robot.
+  - Shares a single `MjModel`/`MjData` instance between env and GUI to avoid
+    drift and duplication.
+
+- The VLA GUI exposes:
+  - Position deltas: `dx, dy, dz` in world frame via buttons.
+  - Rotation deltas: `droll, dpitch, dyaw` (radians) via buttons.
+  - Gripper open/close via a single scalar actuator in `[0, 255]`.
+
+`RecordReplayWrapper` + `LeRobotDatasetWriter` are reused so that each frame
+records:
+
+- `observation.state = [x, y, z, qx, qy, qz, qw]` (EE pose).
+- `action = [dx, dy, dz, droll, dpitch, dyaw, dgrip]` derived from finite
+  differences between consecutive states, regardless of whether the underlying
+  motion came from GUI or scripted logic.
+
+### Mixed Automatic / Manual Intervention Recording
+
+For mixed-control data collection, use:
+
+- `synthetic_gen/mixed_intervention_recording.py`
+
+Key components:
+
+- `RandomizedVLAController` �?" as above, shared MuJoCo state with randomized env.
+- `AutoPickupPolicy` �?" a phased pick-up routine operating in EE space:
+  1. Move above the object by a configurable height.
+  2. Move down near the object.
+  3. Close the gripper.
+  4. Lift the object.
+  5. Hold, then stop.
+- `create_mixed_gui` �?" Tk GUI that lets you:
+  - Start/stop the automatic pick-up policy.
+  - Intervene manually with VLA-style position/rotation/gripper buttons
+    (disabled while auto is running to avoid conflicts).
+  - Randomize/reset the underlying environment state.
+
+The mixed recorder uses the same `RecordReplayWrapper` and `LeRobotDatasetWriter`
+as the other interactive tools, writing a LeRobot-style dataset under
+`datasets/franka_table_manual_randomized_vla_mixed` by default. Automatic
+motions and human interventions are both represented as consistent
+VLA-style actions in the recorded trajectories.
