@@ -111,6 +111,11 @@ def main() -> None:
         default=0.3,
         help="Fraction of each joint's range to sample from (0-1).",
     )
+    parser.add_argument(
+        "--align-orientation",
+        action="store_true",
+        help="If set, policies also align gripper yaw toward the object.",
+    )
     args = parser.parse_args()
 
     if tk is None or ttk is None:
@@ -152,7 +157,7 @@ def main() -> None:
         controller.start_simulation()
         controllers.append(controller)
 
-        auto_policy = AutoGrabPolicy(controller)
+        auto_policy = AutoGrabPolicy(controller, align_orientation=args.align_orientation)
         auto_policies.append(auto_policy)
 
         root = create_mixed_gui_autograb(controller, auto_policy)
@@ -227,7 +232,7 @@ def main() -> None:
                 )
             controllers.append(controller)
 
-            auto_policy = AutoGrabPolicy(controller)
+            auto_policy = AutoGrabPolicy(controller, align_orientation=args.align_orientation)
             auto_policies.append(auto_policy)
 
             create_mixed_gui_autograb(controller, auto_policy, root=root, parent=panels_frame, column=column)

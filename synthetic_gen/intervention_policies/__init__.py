@@ -7,6 +7,7 @@ import numpy as np
 from synthetic_gen.interactive_record_replay_randomized_vla import (  # type: ignore
     RandomizedVLAController,
 )
+from utils.jacobian import yaw_to_face_target  # type: ignore
 
 
 class AutoPickupPolicy:
@@ -29,11 +30,13 @@ class AutoPickupPolicy:
         offset_z_high: float = 0.20,
         offset_z_low: float = 0.03,
         offset_z_lift: float = 0.30,
+        align_orientation: bool = False,
     ) -> None:
         self.controller = controller
         self.offset_z_high = float(offset_z_high)
         self.offset_z_low = float(offset_z_low)
         self.offset_z_lift = float(offset_z_lift)
+        self.align_orientation = bool(align_orientation)
         self.phase: int = 0
         self.active: bool = False
 
@@ -100,6 +103,15 @@ class AutoPickupPolicy:
             self.active = False
             return
 
+        if self.align_orientation:
+            dyaw = yaw_to_face_target(
+                self.controller.model,
+                self.controller.data,
+                self.controller.ee_site_id,
+                obj_pos,
+            )
+            drot[2] = float(dyaw)
+
         if self.active:
             self.controller.apply_ee_delta(dpos, drot, dgrip)
 
@@ -130,10 +142,12 @@ class AutoGrabPolicy:
         controller: RandomizedVLAController,
         grasp_distance: float = 0.04,
         target_object_z: float = 0.75,
+        align_orientation: bool = False,
     ) -> None:
         self.controller = controller
         self.grasp_distance = float(grasp_distance)
         self.target_object_z = float(target_object_z)
+        self.align_orientation = bool(align_orientation)
         self.phase: int = 0
         self.active: bool = False
 
@@ -203,6 +217,15 @@ class AutoGrabPolicy:
             self.active = False
             return
 
+        if self.align_orientation:
+            dyaw = yaw_to_face_target(
+                self.controller.model,
+                self.controller.data,
+                self.controller.ee_site_id,
+                obj_pos,
+            )
+            drot[2] = float(dyaw)
+
         self.controller.apply_ee_delta(dpos, drot, dgrip)
 
     @staticmethod
@@ -212,4 +235,3 @@ class AutoGrabPolicy:
         if dist <= max_step or dist == 0.0:
             return delta.astype(np.float32)
         return (delta / dist * max_step).astype(np.float32)
-
