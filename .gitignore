@@ -16,5 +16,6 @@ Thumbs.db
 venv/
 .env
 
-
+datasets/franka_table_manual
+datasets/sweep_data
 
