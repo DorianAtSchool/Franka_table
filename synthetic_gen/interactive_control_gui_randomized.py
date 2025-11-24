@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 import mujoco
+import mujoco.viewer
 import numpy as np
 
 try:
@@ -30,13 +31,10 @@ except ImportError:
     print("Warning: tkinter not available. Using command-line interface.")
 
 from environments import RandomizedFrankaTable4RobotsEnv
-from synthetic_gen.interactive_control_gui import (
-    InteractiveFrankaGUI as _BaseInteractiveFrankaGUI,
-    create_gui,
-)
+from synthetic_gen.interactive_control_gui import create_gui
 
 
-class RandomizedInteractiveFrankaGUI(_BaseInteractiveFrankaGUI):
+class RandomizedInteractiveFrankaGUI:
     """
     Interactive GUI that uses RandomizedFrankaTable4RobotsEnv for MuJoCo state.
 
@@ -110,9 +108,6 @@ class RandomizedInteractiveFrankaGUI(_BaseInteractiveFrankaGUI):
         print(f"Interactive GUI Control (randomized) for Robot {robot_index + 1}")
         print(f"Joint step size: {self.joint_step:.4f} rad ({np.degrees(self.joint_step):.2f} deg)")
 
-    # ------------------------------------------------------------------
-    # Overrides
-    # ------------------------------------------------------------------
     def reset_robot(self) -> None:
         """Reset the scene and robot to a randomized configuration.
 
@@ -121,24 +116,93 @@ class RandomizedInteractiveFrankaGUI(_BaseInteractiveFrankaGUI):
         perform the randomized reset on the environment, then restart
         the simulation loop.
         """
-        # Check if the simulation thread is currently running.
-        was_running = bool(
-            getattr(self, "simulation_thread", None)
-            and self.simulation_thread.is_alive()
-        )
-
-        if was_running:
-            # Stop background stepping and close viewer before reset.
-            self.stop()
-
         # Reset MuJoCo state via the randomized environment.
         self.env.reset()
         print("Scene reset to randomized initial configuration.")
 
-        if was_running:
-            # Restart simulation loop and viewer.
-            self.running = True
-            self.start_simulation()
+    # ------------------------------------------------------------------
+    # Joint and gripper control (API compatible with InteractiveFrankaGUI)
+    # ------------------------------------------------------------------
+    def move_joint(self, joint_index: int, direction: int) -> None:
+        """Move a specific joint of the selected robot."""
+        if not 0 <= joint_index <= 6:
+            return
+
+        delta = direction * self.joint_step
+        self.data.ctrl[self.ctrl_start + joint_index] += delta
+
+        # Clamp to joint limits using joint ranges from the model.
+        joint_name = f"{self.robot_prefix}{self.joint_names[joint_index]}"
+        joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if joint_id >= 0:
+            jnt_range = self.model.jnt_range[joint_id]
+            if jnt_range[0] < jnt_range[1]:
+                self.data.ctrl[self.ctrl_start + joint_index] = np.clip(
+                    self.data.ctrl[self.ctrl_start + joint_index],
+                    jnt_range[0],
+                    jnt_range[1],
+                )
+
+        direction_str = "+" if direction > 0 else "-"
+        print(
+            f"Joint {joint_index + 1} ({self.joint_names[joint_index]}): "
+            f"{direction_str}{np.degrees(self.joint_step):.2f} deg -> "
+            f"{np.degrees(self.data.ctrl[self.ctrl_start + joint_index]):.2f} deg"
+        )
+
+    def move_gripper(self, direction: int) -> None:
+        """Open/close the gripper for the selected robot."""
+        delta = direction * self.gripper_step
+        self.data.ctrl[self.ctrl_start + 7] += delta
+        self.data.ctrl[self.ctrl_start + 7] = np.clip(
+            self.data.ctrl[self.ctrl_start + 7],
+            0,
+            255,
+        )
+
+        action_str = "Opening" if direction > 0 else "Closing"
+        print(f"Gripper {action_str}: {self.data.ctrl[self.ctrl_start + 7]:.0f}/255")
+
+    def get_joint_position(self, joint_index: int) -> float:
+        """Return current joint position (degrees) for GUI display."""
+        pos_rad = self.data.qpos[self.qpos_start + joint_index]
+        return float(np.degrees(pos_rad))
+
+    def get_gripper_position(self) -> float:
+        """Return current gripper actuator value for GUI display."""
+        return float(self.data.ctrl[self.ctrl_start + 7])
+
+    # ------------------------------------------------------------------
+    # Simulation loop and lifecycle (API compatible with InteractiveFrankaGUI)
+    # ------------------------------------------------------------------
+    def simulation_loop(self) -> None:
+        """Run the simulation loop in a separate thread."""
+        self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+        self.viewer.cam.azimuth = 135
+        self.viewer.cam.elevation = -20
+        self.viewer.cam.distance = 3.0
+        self.viewer.cam.lookat[:] = [0, 0, 0.5]
+
+        while self.running and self.viewer.is_running():
+            mujoco.mj_step(self.model, self.data)
+            self.viewer.sync()
+            time.sleep(0.002)  # ~500 Hz
+
+    def start_simulation(self) -> None:
+        """Start the simulation in a separate thread."""
+        self.simulation_thread = threading.Thread(
+            target=self.simulation_loop,
+            daemon=True,
+        )
+        self.simulation_thread.start()
+
+    def stop(self) -> None:
+        """Stop the simulation and close the viewer."""
+        self.running = False
+        if self.viewer is not None:
+            self.viewer.close()
+        if self.simulation_thread is not None:
+            self.simulation_thread.join(timeout=2.0)
 
 
 def main() -> None:

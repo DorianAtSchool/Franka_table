@@ -260,7 +260,7 @@ def create_gui(controller):
     row += 1
     
     # Reset button
-    btn_reset = ttk.Button(main_frame, text="↺ Reset to Home Position",
+    btn_reset = ttk.Button(main_frame, text="↺ Reset",
                           command=controller.reset_robot)
     btn_reset.grid(row=row, column=0, columnspan=4, pady=10)
     row += 1
