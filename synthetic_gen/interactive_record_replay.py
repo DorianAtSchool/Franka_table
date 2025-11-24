@@ -48,6 +48,7 @@ class RecordReplayWrapper:
         camera: str = "side",
         video_width: int = 1280,
         video_height: int = 720,
+        controls_parent: tk.Widget | None = None,
     ) -> None:
         if tk is None or ttk is None:
             raise RuntimeError("tkinter is required for the recording UI.")
@@ -72,6 +73,7 @@ class RecordReplayWrapper:
         self.camera_id = None
         self.video_width = int(video_width)
         self.video_height = int(video_height)
+        self._controls_parent = controls_parent
 
         # Trial tracking metadata
         self.trial_counter = 0
@@ -119,7 +121,8 @@ class RecordReplayWrapper:
 
     def _build_controls(self) -> None:
         """Add a compact control panel under the existing GUI."""
-        control_frame = ttk.LabelFrame(self.root, text="Record / Replay", padding=8)
+        parent = self._controls_parent if self._controls_parent is not None else self.root
+        control_frame = ttk.LabelFrame(parent, text="Record / Replay", padding=8)
         control_frame.grid(row=99, column=0, sticky=(tk.W, tk.E), padx=10, pady=(0, 10))
 
         btn_start = ttk.Button(control_frame, text="Start Recording", command=self.start_recording)

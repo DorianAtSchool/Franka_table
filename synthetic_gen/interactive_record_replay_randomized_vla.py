@@ -65,17 +65,21 @@ class RandomizedVLAController:
         object_z: float = 0.535,
         randomize_object_orientation: bool = False,
         joint_range_fraction: float = 0.3,
+        env: RandomizedFrankaTable4RobotsEnv | None = None,
     ) -> None:
         # Underlying randomized Gymnasium environment.
-        self.env = RandomizedFrankaTable4RobotsEnv(
-            mjcf_path=mjcf_path,
-            render_mode="human",
-            object_xy_range=object_xy_range,
-            object_z=object_z,
-            randomize_object_orientation=randomize_object_orientation,
-            joint_range_fraction=joint_range_fraction,
-            extra_settle_steps=0,
-        )
+        if env is None:
+            self.env = RandomizedFrankaTable4RobotsEnv(
+                mjcf_path=mjcf_path,
+                render_mode="human",
+                object_xy_range=object_xy_range,
+                object_z=object_z,
+                randomize_object_orientation=randomize_object_orientation,
+                joint_range_fraction=joint_range_fraction,
+                extra_settle_steps=0,
+            )
+        else:
+            self.env = env
         self.model = self.env.model
         self.data = self.env.data
 

@@ -156,18 +156,31 @@ class AutoPickupPolicy:
 def create_mixed_gui(
     controller: RandomizedVLAController,
     auto_policy: AutoPickupPolicy,
+    root: tk.Tk | None = None,
+    parent: tk.Widget | None = None,
+    column: int = 0,
 ) -> tk.Tk | None:
-    """GUI with both automatic and manual VLA-style controls."""
+    """GUI with both automatic and manual VLA-style controls.
+
+    If ``root`` is None, a new top-level Tk window is created. Otherwise, the
+    controls are attached to the provided root at the given ``row_offset`` so
+    multiple robots can share a single window.
+    """
     if tk is None or ttk is None:
         print("Error: tkinter is required for mixed intervention GUI mode")
         return None
 
-    root = tk.Tk()
-    root.title(f"Robot {controller.robot_index + 1} Mixed Control (Randomized)")
-    root.geometry("460x520")
+    own_root = False
+    if root is None:
+        root = tk.Tk()
+        root.title(f"Robot {controller.robot_index + 1} Mixed Control (Randomized)")
+        root.geometry("460x520")
+        own_root = True
 
-    frame = ttk.Frame(root, padding="10")
-    frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    container = parent if parent is not None else root
+
+    frame = ttk.Frame(container, padding="10", borderwidth=2, relief="groove")
+    frame.grid(row=0, column=column, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
 
     title = ttk.Label(
         frame,
@@ -350,11 +363,13 @@ def create_mixed_gui(
     root.after(100, update_grip_label)
     root.after(200, update_auto_status)
 
-    def on_closing() -> None:
-        controller.stop()
-        root.destroy()
+    if own_root:
+        def on_closing() -> None:
+            controller.stop()
+            root.destroy()
 
-    root.protocol("WM_DELETE_WINDOW", on_closing)
+        root.protocol("WM_DELETE_WINDOW", on_closing)
+
     return root
 
 
@@ -370,6 +385,12 @@ def main() -> None:
         description="Mixed automatic/manual VLA control with randomized starts and record/replay."
     )
     parser.add_argument("--robot", type=int, default=0, choices=[0, 1, 2, 3], help="Robot index to control.")
+    parser.add_argument(
+        "--robots",
+        type=int,
+        nargs="+",
+        help="Optional list of robot indices to control (overrides --robot when provided).",
+    )
     parser.add_argument(
         "--scene",
         type=str,
@@ -431,45 +452,220 @@ def main() -> None:
     dataset_root = Path(args.dataset_root).resolve()
     dataset_root.mkdir(parents=True, exist_ok=True)
 
-    controller = RandomizedVLAController(
-        mjcf_path=str(scene_path),
-        robot_index=args.robot,
-        object_xy_range=tuple(args.object_xy_range),
-        object_z=args.object_z,
-        randomize_object_orientation=args.randomize_object_orientation,
-        joint_range_fraction=args.joint_range_fraction,
-    )
-    controller.start_simulation()
+    # Determine which robots to control.
+    robot_indices = args.robots if args.robots is not None else [args.robot]
 
-    auto_policy = AutoPickupPolicy(controller)
-    root = create_mixed_gui(controller, auto_policy)
-    if root is None:
-        controller.stop()
-        return
+    controllers: list[RandomizedVLAController] = []
+    auto_policies: list[AutoPickupPolicy] = []
+    wrappers: list[RecordReplayWrapper] = []
 
-    writer = LeRobotDatasetWriter(
-        root=dataset_root,
-        dataset_name=args.dataset_name,
-        fps=args.fps,
-        cameras=[args.camera],
-    )
+    # Single-robot case: keep existing behavior (one window).
+    if len(robot_indices) == 1:
+        idx = robot_indices[0]
 
-    wrapper = RecordReplayWrapper(
-        controller=controller,
-        root=root,
-        writer=writer,
-        task_text=args.task,
-        fps=args.fps,
-        camera=args.camera,
-        video_width=args.video_width,
-        video_height=args.video_height,
-    )
+        writer = LeRobotDatasetWriter(
+            root=dataset_root,
+            dataset_name=args.dataset_name,
+            fps=args.fps,
+            cameras=[args.camera],
+        )
 
-    try:
-        root.mainloop()
-    finally:
-        controller.stop()
-        _ = wrapper
+        controller = RandomizedVLAController(
+            mjcf_path=str(scene_path),
+            robot_index=idx,
+            object_xy_range=tuple(args.object_xy_range),
+            object_z=args.object_z,
+            randomize_object_orientation=args.randomize_object_orientation,
+            joint_range_fraction=args.joint_range_fraction,
+        )
+        controller.start_simulation()
+        controllers.append(controller)
+
+        auto_policy = AutoPickupPolicy(controller)
+        auto_policies.append(auto_policy)
+
+        root = create_mixed_gui(controller, auto_policy)
+        if root is None:
+            controller.stop()
+            return
+
+        wrapper = RecordReplayWrapper(
+            controller=controller,
+            root=root,
+            writer=writer,
+            task_text=args.task,
+            fps=args.fps,
+            camera=args.camera,
+            video_width=args.video_width,
+            video_height=args.video_height,
+        )
+        wrappers.append(wrapper)
+
+        try:
+            root.mainloop()
+        finally:
+            for c in controllers:
+                c.stop()
+    else:
+        # Multi-robot: share a single MuJoCo env/model/data and a single viewer,
+        # but provide a horizontally stacked, scrollable GUI panel (and recorder)
+        # per robot. Each robot writes to its own dataset root, plus a central
+        # controller can broadcast commands to all robots.
+        root = tk.Tk()
+        root.title("Franka Mixed Control (Multiple Robots)")
+
+        # Scrollable canvas for horizontal stacking of controller panels.
+        canvas = tk.Canvas(root)
+        h_scroll = ttk.Scrollbar(root, orient="horizontal", command=canvas.xview)
+        canvas.configure(xscrollcommand=h_scroll.set)
+        canvas.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
+        h_scroll.grid(row=1, column=0, sticky=(tk.W, tk.E))
+
+        root.grid_rowconfigure(0, weight=1)
+        root.grid_columnconfigure(0, weight=1)
+
+        panels_frame = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=panels_frame, anchor="nw")
+
+        def _on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        panels_frame.bind("<Configure>", _on_frame_configure)
+
+        column = 0
+        shared_env = None
+
+        for j, idx in enumerate(robot_indices):
+            if j == 0:
+                # First robot: create shared env and viewer
+                controller = RandomizedVLAController(
+                    mjcf_path=str(scene_path),
+                    robot_index=idx,
+                    object_xy_range=tuple(args.object_xy_range),
+                    object_z=args.object_z,
+                    randomize_object_orientation=args.randomize_object_orientation,
+                    joint_range_fraction=args.joint_range_fraction,
+                )
+                shared_env = controller.env
+                controller.start_simulation()  # single viewer for shared env
+            else:
+                controller = RandomizedVLAController(
+                    mjcf_path=str(scene_path),
+                    robot_index=idx,
+                    object_xy_range=tuple(args.object_xy_range),
+                    object_z=args.object_z,
+                    randomize_object_orientation=args.randomize_object_orientation,
+                    joint_range_fraction=args.joint_range_fraction,
+                    env=shared_env,
+                )
+            controllers.append(controller)
+
+            auto_policy = AutoPickupPolicy(controller)
+            auto_policies.append(auto_policy)
+
+            create_mixed_gui(controller, auto_policy, root=root, parent=panels_frame, column=column)
+            panel = panels_frame.winfo_children()[-1]
+            column += 1
+
+            # Separate dataset per robot under dataset_root / f"robot{idx}"
+            robot_root = (dataset_root / f"robot{idx}").resolve()
+            robot_root.mkdir(parents=True, exist_ok=True)
+            writer = LeRobotDatasetWriter(
+                root=robot_root,
+                dataset_name=f"{args.dataset_name}_robot{idx}",
+                fps=args.fps,
+                cameras=[args.camera],
+            )
+
+            wrapper = RecordReplayWrapper(
+                controller=controller,
+                root=root,
+                writer=writer,
+                task_text=f"{args.task} (robot {idx})",
+                fps=args.fps,
+                camera=args.camera,
+                video_width=args.video_width,
+                video_height=args.video_height,
+                controls_parent=panel,
+            )
+            wrappers.append(wrapper)
+
+        # ------------------------------------------------------------------
+        # Central controller: broadcast control to all robots at once
+        # ------------------------------------------------------------------
+        central_frame = ttk.LabelFrame(root, text="All Robots Control", padding=8)
+        central_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=10, pady=(5, 10))
+
+        def all_start_auto() -> None:
+            for policy in auto_policies:
+                policy.reset()
+
+        def all_stop_auto() -> None:
+            for policy in auto_policies:
+                policy.stop()
+
+        def all_reset() -> None:
+            # Single env/shared data: one reset is sufficient; use first controller.
+            if controllers:
+                controllers[0].reset_robot()
+
+        def all_start_recording() -> None:
+            for w in wrappers:
+                try:
+                    w.start_recording()
+                except Exception:
+                    pass
+
+        def all_discard() -> None:
+            for w in wrappers:
+                try:
+                    w.restart_recording()
+                except Exception:
+                    pass
+
+        def all_save() -> None:
+            for w in wrappers:
+                try:
+                    w.save_recording()
+                except Exception:
+                    pass
+
+        def all_replay() -> None:
+            for w in wrappers:
+                try:
+                    w.start_replay()
+                except Exception:
+                    pass
+
+        row = 0
+        ttk.Button(central_frame, text="Start Auto Pickup (All)", command=all_start_auto).grid(
+            row=row, column=0, padx=4, pady=2, sticky=(tk.W, tk.E)
+        )
+        ttk.Button(central_frame, text="Stop Auto (All)", command=all_stop_auto).grid(
+            row=row, column=1, padx=4, pady=2, sticky=(tk.W, tk.E)
+        )
+        ttk.Button(central_frame, text="Reset (All)", command=all_reset).grid(
+            row=row, column=2, padx=4, pady=2, sticky=(tk.W, tk.E)
+        )
+        row += 1
+        ttk.Button(central_frame, text="Start Recording (All)", command=all_start_recording).grid(
+            row=row, column=0, padx=4, pady=2, sticky=(tk.W, tk.E)
+        )
+        ttk.Button(central_frame, text="Discard (All)", command=all_discard).grid(
+            row=row, column=1, padx=4, pady=2, sticky=(tk.W, tk.E)
+        )
+        ttk.Button(central_frame, text="Save (All)", command=all_save).grid(
+            row=row, column=2, padx=4, pady=2, sticky=(tk.W, tk.E)
+        )
+        ttk.Button(central_frame, text="Replay (All)", command=all_replay).grid(
+            row=row, column=3, padx=4, pady=2, sticky=(tk.W, tk.E)
+        )
+
+        try:
+            root.mainloop()
+        finally:
+            for c in controllers:
+                c.stop()
 
 
 if __name__ == "__main__":

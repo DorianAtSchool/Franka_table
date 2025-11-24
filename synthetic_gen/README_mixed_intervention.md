@@ -68,7 +68,7 @@ The policy is **resume-aware**:
 
 `create_mixed_gui(controller, auto_policy)` provides a Tk GUI that exposes:
 
-- Automatic controls:
+- Automatic controls (per robot):
   - `Start Auto Pickup` – calls `auto_policy.reset()`.
   - `Stop Auto` – calls `auto_policy.stop()`.
   - Status label: `Auto: running (phase X)` / `Auto: idle`.
@@ -89,6 +89,18 @@ The GUI periodically:
 - Calls `auto_policy.step()` at ~25 Hz while auto is active.
 - Updates gripper readout and auto-status labels.
 
+In multi-robot mode, the GUI:
+
+- Creates a **single** Tk window and one shared MuJoCo viewer.
+- Uses a horizontally scrollable row of panels (one per robot), each created
+  via `create_mixed_gui(...)`.
+- Adds a central **"All Robots Control"** section below the panels with:
+  - `Start Auto Pickup (All)`, `Stop Auto (All)`, `Reset (All)`
+  - `Start Recording (All)`, `Discard (All)`, `Save (All)`, `Replay (All)`
+
+These central buttons broadcast to all robots (all `AutoPickupPolicy` and
+`RecordReplayWrapper` instances) while leaving the per-robot controls intact.
+
 ---
 
 ## Recording Dataset
@@ -103,18 +115,25 @@ The GUI periodically:
     interventions are recorded uniformly.
   - Timestamps, `next.done`, and optional camera video frames.
 
-Default dataset root and name:
+Default dataset layout:
 
-- Root: `datasets/franka_table_manual_randomized_vla_mixed`
-- Dataset name in `meta/info.json`:
-  - `"dataset_name": "franka_table_manual_randomized_vla_mixed"`
+- Single-robot (`--robot`):
+  - Root: `datasets/franka_table_manual_randomized_vla_mixed`
+  - Dataset name in `meta/info.json`:
+    - `"dataset_name": "franka_table_manual_randomized_vla_mixed"`
+  - Standard LeRobot-style format:
+    - `data/chunk-000/episode_XXXXXX.parquet`
+    - `meta/episodes/chunk-000/file-000.parquet`
+    - `meta/info.json`, `meta/tasks.parquet`, `episodes.jsonl`
+    - `videos/<camera>/...` and `meta/trial_mapping.jsonl` for videos.
 
-Layout follows the standard LeRobot-style format:
-
-- `data/chunk-000/episode_XXXXXX.parquet`
-- `meta/episodes/chunk-000/file-000.parquet`
-- `meta/info.json`, `meta/tasks.parquet`, `episodes.jsonl`
-- `videos/<camera>/...` and `meta/trial_mapping.jsonl` for videos.
+- Multi-robot (`--robots 0 1 2 ...`):
+  - Root: `datasets/franka_table_manual_randomized_vla_mixed/robot{i}` per robot index `i`.
+  - Each robot gets its **own** dataset:
+    - `root = .../robot0`, `dataset_name = "..._robot0"`
+    - `root = .../robot1`, `dataset_name = "..._robot1"`
+    - etc.
+  - Each per-robot dataset follows the same LeRobot-style layout as above.
 
 ---
 
@@ -133,6 +152,8 @@ python -m franka_table.synthetic_gen.mixed_intervention_recording \
 Key arguments:
 
 - `--robot {0,1,2,3}` – which robot to control (0-based index).
+- `--robots 0 1 2 ...` – optional list of robot indices to control; when set,
+  overrides `--robot` and enables multi-robot mode.
 - `--scene PATH` – MuJoCo scene XML, relative to repo root or absolute.
 - `--dataset-root PATH` – output dataset root (default as above).
 - `--dataset-name STR` – stored in `meta/info.json`.
@@ -146,8 +167,11 @@ Key arguments:
 
 During a run:
 
-- Use **Start Auto Pickup** to let the scripted policy attempt a lift.
-- Hit **Stop Auto** at any time to intervene manually with the VLA buttons.
+- Use **Start Auto Pickup** on a panel to let the scripted policy attempt a
+  lift for that robot, or use the central **Start Auto Pickup (All)** to start
+  all robots at once.
+- Hit **Stop Auto** (per-robot or central) at any time to intervene manually
+  with the VLA buttons.
 - You can restart auto pickup after intervening; the policy will continue from
   the current state, not the original starting pose.
 

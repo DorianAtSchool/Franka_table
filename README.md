@@ -283,3 +283,17 @@ as the other interactive tools, writing a LeRobot-style dataset under
 `datasets/franka_table_manual_randomized_vla_mixed` by default. Automatic
 motions and human interventions are both represented as consistent
 VLA-style actions in the recorded trajectories.
+
+In multi-robot mode (`--robots 0 1 2 ...`), `mixed_intervention_recording.py`:
+
+- Shares a single `RandomizedFrankaTable4RobotsEnv` (one MuJoCo `MjModel`/`MjData`
+  and one viewer) across all selected robots.
+- Creates a horizontally scrollable GUI window with one mixed-control panel
+  per robot, plus a central "All Robots Control" section to:
+  - Start/stop auto pickup for all robots.
+  - Reset the shared environment.
+  - Start/discard/save/replay recording for all robots at once.
+- Writes a **separate LeRobot-style dataset per robot** under
+  `datasets/franka_table_manual_randomized_vla_mixed/robot{i}`, so each robot’s
+  demonstrations are stored in their own dataset root while still being
+  collected from a shared multi-arm MuJoCo scene.
