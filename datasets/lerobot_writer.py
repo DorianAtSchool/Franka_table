@@ -354,6 +354,8 @@ class LeRobotDatasetWriter:
         stats: Dict[str, Dict[str, Any]] = {}
         all_states: List[np.ndarray] = []
         all_actions: List[np.ndarray] = []
+        state_dim_ref: Optional[int] = None
+        action_dim_ref: Optional[int] = None
         for ep in all_eps:
             rel_pq = ep.get("parquet")
             if not rel_pq:
@@ -365,10 +367,20 @@ class LeRobotDatasetWriter:
             df = table.to_pandas()
             if "observation.state" in df.columns and len(df) > 0:
                 states_ep = np.asarray(df["observation.state"].to_list(), dtype=np.float32)
-                all_states.append(states_ep)
+                if states_ep.ndim == 2:
+                    cur_dim = states_ep.shape[1]
+                    if state_dim_ref is None:
+                        state_dim_ref = cur_dim
+                    if cur_dim == state_dim_ref:
+                        all_states.append(states_ep)
             if "action" in df.columns and len(df) > 0:
                 actions_ep = np.asarray(df["action"].to_list(), dtype=np.float32)
-                all_actions.append(actions_ep)
+                if actions_ep.ndim == 2:
+                    cur_dim_a = actions_ep.shape[1]
+                    if action_dim_ref is None:
+                        action_dim_ref = cur_dim_a
+                    if cur_dim_a == action_dim_ref:
+                        all_actions.append(actions_ep)
 
         if all_states:
             states_arr = np.concatenate(all_states, axis=0)

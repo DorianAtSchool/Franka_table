@@ -31,7 +31,7 @@ if str(SCRIPT_DIR) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
-from interactive_contol_gui import InteractiveFrankaGUI, create_gui  # type: ignore
+from interactive_control_gui import InteractiveFrankaGUI, create_gui  # type: ignore
 from datasets.lerobot_writer import LeRobotDatasetWriter  # type: ignore
 
 
@@ -76,6 +76,8 @@ class RecordReplayWrapper:
         # Trial tracking metadata
         self.trial_counter = 0
         self.initial_object_z: Optional[float] = None
+        self.prev_state: Optional[np.ndarray] = None
+        self.prev_grip: Optional[float] = None
 
         try:
             self.camera_id = mujoco.mj_name2id(
@@ -83,7 +85,30 @@ class RecordReplayWrapper:
             )
         except Exception:
             self.camera_id = None
-        # No separate renderer: rely on the GUI viewer for frame capture.
+
+        # End-effector site and gripper joints for EE pose/state
+        robot_id = controller.robot_index + 1
+        ee_site_name = f"robot{robot_id}_gripper_center"
+        finger1_name = f"robot{robot_id}_finger_joint1"
+        finger2_name = f"robot{robot_id}_finger_joint2"
+        try:
+            self.ee_site_id = mujoco.mj_name2id(
+                controller.model, mujoco.mjtObj.mjOBJ_SITE, ee_site_name
+            )
+        except Exception:
+            self.ee_site_id = -1
+        try:
+            j1_id = mujoco.mj_name2id(
+                controller.model, mujoco.mjtObj.mjOBJ_JOINT, finger1_name
+            )
+            j2_id = mujoco.mj_name2id(
+                controller.model, mujoco.mjtObj.mjOBJ_JOINT, finger2_name
+            )
+            self.j1_qadr = controller.model.jnt_qposadr[j1_id]
+            self.j2_qadr = controller.model.jnt_qposadr[j2_id]
+        except Exception:
+            self.j1_qadr = None
+            self.j2_qadr = None
 
         # UI state
         self.status_var = tk.StringVar(value="Idle (not recording)")
@@ -127,6 +152,8 @@ class RecordReplayWrapper:
         self.recording_start_time = time.time()
         self.frame_index = 0
         self.video_frames = []
+        self.prev_state = None
+        self.prev_grip = None
         self.frames_var.set("0 frames")
         self.status_var.set(f"Recording {self._episode_prefix}")
 
@@ -143,6 +170,8 @@ class RecordReplayWrapper:
         self.replay_frames = []
         self.frame_index = 0
         self.video_frames = []
+        self.prev_state = None
+        self.prev_grip = None
         # Also reset the robot/environment state.
         try:
             self.controller.reset_robot()
@@ -155,8 +184,10 @@ class RecordReplayWrapper:
         """Sample state/action at the chosen FPS while recording."""
         if self.recording and self.episode is not None and self.recording_start_time is not None:
             timestamp = time.time() - self.recording_start_time
-            state = self._get_state_vector()
-            action = self._get_action_vector()
+            state, grip = self._get_ee_state_and_grip()
+            action = self._get_action_vector(state, grip)
+            self.prev_state = state
+            self.prev_grip = grip
             self.episode.add_frame(
                 observation_state=state,
                 action=action,
@@ -293,16 +324,71 @@ class RecordReplayWrapper:
         self.root.after(self.capture_interval_ms, self._replay_step)
 
     def _get_state_vector(self) -> np.ndarray:
-        """State = robot joint positions (7) + gripper joints (2)."""
-        qpos = self.controller.data.qpos
-        start = self.controller.qpos_start
-        return np.array(qpos[start : start + 9], dtype=np.float32)
+        """State = end-effector pose [x, y, z, qx, qy, qz, qw]."""
+        state, _ = self._get_ee_state_and_grip()
+        return state
 
-    def _get_action_vector(self) -> np.ndarray:
-        """Action = current control targets (7 joints + gripper control)."""
-        ctrl = self.controller.data.ctrl
-        start = self.controller.ctrl_start
-        return np.array(ctrl[start : start + 8], dtype=np.float32)
+    def _get_ee_state_and_grip(self) -> tuple[np.ndarray, float]:
+        """Return (EE pose, gripper) matching pickup sweep conventions."""
+        data = self.controller.data
+        if self.ee_site_id is not None and self.ee_site_id >= 0:
+            pos = data.site_xpos[self.ee_site_id].copy()
+            mat_flat = data.site_xmat[self.ee_site_id].copy()
+            quat = np.empty(4, dtype=np.float64)
+            mujoco.mju_mat2Quat(quat, mat_flat)
+            qw, qx, qy, qz = quat
+            state = np.array([pos[0], pos[1], pos[2], qx, qy, qz, qw], dtype=np.float32)
+        else:
+            state = np.zeros(7, dtype=np.float32)
+
+        grip = 0.0
+        try:
+            if self.j1_qadr is not None and self.j2_qadr is not None:
+                grip = float(0.5 * (data.qpos[self.j1_qadr] + data.qpos[self.j2_qadr]))
+        except Exception:
+            grip = 0.0
+        return state, grip
+
+    def _quat_to_rpy(self, qw: float, qx: float, qy: float, qz: float) -> tuple[float, float, float]:
+        """Quaternion (w,x,y,z) -> roll, pitch, yaw (XYZ)."""
+        sinr_cosp = 2 * (qw * qx + qy * qz)
+        cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2 * (qw * qy - qz * qx)
+        pitch = math.copysign(math.pi / 2, sinp) if abs(sinp) >= 1 else math.asin(sinp)
+
+        siny_cosp = 2 * (qw * qz + qx * qy)
+        cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        return roll, pitch, yaw
+
+    def _get_action_vector(self, state: np.ndarray, grip: float) -> np.ndarray:
+        """Action = [dx, dy, dz, droll, dpitch, dyaw, dgrip]."""
+        if self.prev_state is None:
+            return np.zeros(7, dtype=np.float32)
+
+        dx = state[0] - self.prev_state[0]
+        dy = state[1] - self.prev_state[1]
+        dz = state[2] - self.prev_state[2]
+
+        qw, qx, qy, qz = state[6], state[3], state[4], state[5]
+        prev_qw, prev_qx, prev_qy, prev_qz = (
+            self.prev_state[6],
+            self.prev_state[3],
+            self.prev_state[4],
+            self.prev_state[5],
+        )
+        roll, pitch, yaw = self._quat_to_rpy(qw, qx, qy, qz)
+        prev_roll, prev_pitch, prev_yaw = self._quat_to_rpy(prev_qw, prev_qx, prev_qy, prev_qz)
+
+        droll = roll - prev_roll
+        dpitch = pitch - prev_pitch
+        dyaw = yaw - prev_yaw
+        prev_grip = self.prev_grip if self.prev_grip is not None else grip
+        dgrip = grip - prev_grip
+
+        return np.array([dx, dy, dz, droll, dpitch, dyaw, dgrip], dtype=np.float32)
 
 
 def _resolve_scene(scene_arg: str) -> Path:

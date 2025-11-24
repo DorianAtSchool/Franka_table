@@ -6,6 +6,7 @@ from gymnasium import spaces
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
+
 class FrankaTable4RobotsEnv(gym.Env):
     """
     Franka Panda multi-robot environment with 4 robots and a moveable object.
@@ -255,6 +256,136 @@ class FrankaTable4RobotsEnv(gym.Env):
             if self.render_mode == "human":
                 self.viewer.close()
             self.viewer = None
+
+
+class RandomizedFrankaTable4RobotsEnv(FrankaTable4RobotsEnv):
+    """
+    Wrapper around :class:`FrankaTable4RobotsEnv` that randomizes the
+    initial robot joint configurations and object pose on reset.
+
+    The API (observations, actions, step/ reset signatures) is identical
+    to the base environment; only the starting configuration is changed.
+    """
+
+    def __init__(
+        self,
+        mjcf_path: str = "scene_4pandas_table.xml",
+        render_mode: str = "human",
+        control_dt: float = 0.02,
+        physics_dt: float = 0.002,
+        # Object sampling region (XY on table, fixed Z)
+        object_xy_range: Tuple[float, float, float, float] = (-0.3, 0.3, -0.25, 0.25),
+        object_z: float = 0.535,
+        randomize_object_orientation: bool = False,
+        # Robot joint randomization
+        joint_range_fraction: float = 0.3,
+        # Extra physics settle steps after randomization
+        extra_settle_steps: int = 10,
+    ) -> None:
+        super().__init__(
+            mjcf_path=mjcf_path,
+            render_mode=render_mode,
+            control_dt=control_dt,
+            physics_dt=physics_dt,
+        )
+        self.object_xy_range = object_xy_range
+        self.object_z = float(object_z)
+        self.randomize_object_orientation = bool(randomize_object_orientation)
+        self.joint_range_fraction = float(joint_range_fraction)
+        self.extra_settle_steps = int(extra_settle_steps)
+
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
+        """
+        Reset the environment to a randomized initial state.
+
+        This implementation intentionally does NOT call
+        ``FrankaTable4RobotsEnv.reset`` to keep the randomized environment's
+        initialization independent from the base environment. It still uses
+        Gymnasium's ``Env.reset`` for seeding.
+        """
+        # Seed RNG via Gymnasium base class without invoking the base env reset.
+        gym.Env.reset(self, seed=seed, options=options)
+
+        # Clear MuJoCo state to a valid default configuration.
+        mujoco.mj_resetData(self.model, self.data)
+
+        # Randomize initial state
+        self._randomize_object_pose()
+        self._randomize_robot_joints()
+
+        # Re-sync MuJoCo and optionally let physics settle briefly
+        mujoco.mj_forward(self.model, self.data)
+        for _ in range(max(0, self.extra_settle_steps)):
+            mujoco.mj_step(self.model, self.data)
+
+        obs = self._get_obs()
+        info = {
+            "initial_object_position": self.data.qpos[0:3].copy(),
+            "initial_object_orientation": self.data.qpos[3:7].copy(),
+        }
+        return obs, info
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _randomize_object_pose(self) -> None:
+        """Randomize object XY position (and optionally orientation)."""
+        # Gymnasium's Env.reset seeds self.np_random
+        rng = getattr(self, "np_random", np.random)
+        x_min, x_max, y_min, y_max = self.object_xy_range
+        x = rng.uniform(x_min, x_max)
+        y = rng.uniform(y_min, y_max)
+        z = self.object_z
+        self.data.qpos[0:3] = [x, y, z]
+
+        if self.randomize_object_orientation:
+            # Sample a random unit quaternion (w, x, y, z)
+            u1, u2, u3 = rng.random(3)
+            qx = np.sqrt(1 - u1) * np.sin(2 * np.pi * u2)
+            qy = np.sqrt(1 - u1) * np.cos(2 * np.pi * u2)
+            qz = np.sqrt(u1) * np.sin(2 * np.pi * u3)
+            qw = np.sqrt(u1) * np.cos(2 * np.pi * u3)
+            self.data.qpos[3:7] = [qw, qx, qy, qz]
+        else:
+            # Keep default upright orientation
+            self.data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+
+    def _randomize_robot_joints(self) -> None:
+        """Randomize arm joints for all robots within a fraction of their limits."""
+        rng = getattr(self, "np_random", np.random)
+        frac = np.clip(self.joint_range_fraction, 0.0, 1.0)
+
+        for robot_idx in range(self.num_robots):
+            qpos_start = 7 + robot_idx * 9
+            prefix = self.robot_prefixes[robot_idx]
+
+            for j in range(7):
+                joint_name = f"{prefix}joint{j+1}"
+                joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+                if joint_id < 0:
+                    continue
+                jnt_range = self.model.jnt_range[joint_id]
+                low, high = float(jnt_range[0]), float(jnt_range[1])
+                if not (high > low):
+                    # Fallback: small noise around current value
+                    current = float(self.data.qpos[qpos_start + j])
+                    self.data.qpos[qpos_start + j] = current + rng.uniform(-0.2, 0.2)
+                    continue
+
+                center = 0.5 * (low + high)
+                half_span = 0.5 * (high - low) * frac
+                angle = rng.uniform(center - half_span, center + half_span)
+                self.data.qpos[qpos_start + j] = angle
+
+            # Keep grippers open as in the base env
+            self.data.qpos[qpos_start + 7 : qpos_start + 9] = [0.04, 0.04]
+
+        # Update controls to match randomized joint positions
+        for robot_idx in range(self.num_robots):
+            ctrl_start = robot_idx * 8
+            qpos_start = 7 + robot_idx * 9
+            self.data.ctrl[ctrl_start : ctrl_start + 7] = self.data.qpos[qpos_start : qpos_start + 7].copy()
+            self.data.ctrl[ctrl_start + 7] = 255
 
 
 def test_env():

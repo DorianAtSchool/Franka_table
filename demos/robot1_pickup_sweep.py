@@ -27,8 +27,8 @@ import mediapy as media
 import mujoco
 import numpy as np
 
-from franka_table.demos.robot1_pickup_demo import create_pickup_trajectory
-from franka_table.datasets.lerobot_writer import LeRobotDatasetWriter
+from demos.robot1_pickup_demo import create_pickup_trajectory
+from datasets.lerobot_writer import LeRobotDatasetWriter
 
 
 # Base joint configuration used in the original demo
@@ -40,10 +40,10 @@ BASE_TARGET_JOINTS = np.array(
 def find_scene_path() -> str:
     """Locate a 4-robot scene XML, trying several known locations."""
     candidates = [
-        os.path.join("franka_table", "scenes", "scene_4robots.xml"),
-        os.path.join("franka_table", "scenes", "scene_4robots_real.xml"),
+        os.path.join("scenes", "scene_4robots.xml"),
+        os.path.join("scenes", "scene_4robots_real.xml"),
         os.path.join(
-            "franka_table", "scenes", "franka_emika_panda", "scene_4pandas_table.xml"
+            "scenes", "franka_emika_panda", "scene_4pandas_table.xml"
         ),
     ]
 
