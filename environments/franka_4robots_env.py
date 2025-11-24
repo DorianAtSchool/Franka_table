@@ -39,7 +39,7 @@ class FrankaTable4RobotsEnv(gym.Env):
         if isinstance(mjcf_path, Path):
             mjcf_path = str(mjcf_path)
         
-        mjcf_path = "franka_table/scenes/franka_emika_panda/scene_4pandas_table.xml"  # Hardcoded path for this example
+        # mjcf_path = "franka_table/scenes/franka_emika_panda/scene_4pandas_table.xml"  # Hardcoded path for this example
         self.model = mujoco.MjModel.from_xml_path(mjcf_path)
         self.data = mujoco.MjData(self.model)
         self.control_dt = control_dt
